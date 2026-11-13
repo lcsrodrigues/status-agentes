@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Status dos agentes</title>
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --text:#e6e8ee; --muted:#8a90a0; --ok:#22c55e; --warn:#f59e0b; --err:#ef4444; --info:#64748b; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--text); }
+  header { padding:20px; border-bottom:1px solid #262a33; display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+  h1 { font-size:20px; margin:0; }
+  h2 { font-size:15px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.05em; margin:24px 20px 10px; }
+  button { background:#262a33; color:var(--text); border:0; border-radius:8px; padding:8px 14px; cursor:pointer; }
+  main { max-width:900px; margin:0 auto; padding-bottom:40px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(240px,1fr)); gap:12px; padding:0 20px; }
+  .card { background:var(--card); border-radius:10px; padding:14px; border-left:4px solid var(--info); }
+  .card.CONCLUIDO { border-color:var(--ok); }
+  .card.PRECISA_DE_VOCE { border-color:var(--warn); }
+  .card.ERRO { border-color:var(--err); }
+  .project { font-weight:600; }
+  .badge { display:inline-block; font-size:12px; padding:2px 8px; border-radius:999px; background:#262a33; margin:6px 0; }
+  .msg { color:var(--text); font-size:14px; line-height:1.4; word-break:break-word; }
+  .meta { color:var(--muted); font-size:12px; margin-top:8px; }
+  .event { display:flex; gap:12px; padding:12px 20px; border-bottom:1px solid #222630; }
+  .event .dot { width:10px; height:10px; border-radius:50%; margin-top:6px; flex-shrink:0; background:var(--info); }
+  .event.CONCLUIDO .dot { background:var(--ok); }
+  .event.PRECISA_DE_VOCE .dot { background:var(--warn); }
+  .event.ERRO .dot { background:var(--err); }
+  .event a { color:#60a5fa; }
+  .empty, .error { padding:20px; color:var(--muted); }
+  .error { color:var(--err); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Status dos agentes</h1>
+  <button id="refresh">Atualizar</button>
+</header>
+<main>
+  <h2>Ultimo status por projeto</h2>
+  <div id="projects" class="grid"></div>
+  <h2>Historico</h2>
+  <div id="timeline"></div>
+</main>
+
+<script>
+const REPO = "lcsrodrigues/status-agentes";
+const API = `https://api.github.com/repos/${REPO}/contents/data/events`;
+const RAW = `https://raw.githubusercontent.com/${REPO}/main/data/events/`;
+const LABEL = { CONCLUIDO: "Concluido", PRECISA_DE_VOCE: "Precisa de voce", ERRO: "Erro" };
+
+function el(tag, cls, text) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function formatTime(iso) {
+  const d = new Date(iso);
+  return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function render(events) {
+  const projects = document.getElementById("projects");
+  const timeline = document.getElementById("timeline");
+  projects.replaceChildren();
+  timeline.replaceChildren();
+
+  if (events.length === 0) {
+    timeline.append(el("div", "empty", "Nenhum evento ainda."));
+    return;
+  }
+
+  const latest = new Map();
+  for (const ev of events) {
+    if (!latest.has(ev.project)) latest.set(ev.project, ev);
+  }
+  for (const ev of latest.values()) {
+    const card = el("div", `card ${ev.status}`);
+    card.append(el("div", "project", ev.project));
+    card.append(el("span", "badge", LABEL[ev.status] || ev.status));
+    card.append(el("div", "msg", ev.message));
+    card.append(el("div", "meta", formatTime(ev.time)));
+    projects.append(card);
+  }
+
+  for (const ev of events) {
+    const row = el("div", `event ${ev.status}`);
+    row.append(el("div", "dot"));
+    const body = el("div");
+    body.append(el("div", "", `[${ev.project}] ${LABEL[ev.status] || ev.status}`));
+    body.append(el("div", "msg", ev.message));
+    if (ev.url) {
+      const a = el("a", "", "Abrir");
+      a.href = ev.url;
+      a.target = "_blank";
+      a.rel = "noopener";
+      body.append(a);
+    }
+    body.append(el("div", "meta", formatTime(ev.time)));
+    row.append(body);
+    timeline.append(row);
+  }
+}
+
+async function load() {
+  const timeline = document.getElementById("timeline");
+  try {
+    const res = await fetch(API);
+    if (!res.ok) throw new Error(`GitHub respondeu ${res.status}`);
+    const list = await res.json();
+    const names = list
+      .map(f => f.name)
+      .filter(n => n.endsWith(".json"))
+      .sort()
+      .reverse()
+      .slice(0, 200);
+    const events = await Promise.all(
+      names.map(n => fetch(RAW + n, { cache: "no-store" }).then(r => r.json()))
+    );
+    render(events);
+  } catch (err) {
+    timeline.replaceChildren(el("div", "error", `Nao foi possivel carregar: ${err.message}`));
+  }
+}
+
+document.getElementById("refresh").addEventListener("click", load);
+load();
+</script>
+</body>
+</html>
